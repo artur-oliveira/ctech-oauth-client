@@ -1,5 +1,8 @@
 # @aoctech/auth-client
 
+[![CI](https://github.com/artur-oliveira/ctech-oauth-client/actions/workflows/ci.yml/badge.svg)](https://github.com/artur-oliveira/ctech-oauth-client/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@aoctech/auth-client)](https://www.npmjs.com/package/@aoctech/auth-client)
+
 Shared browser OAuth 2.0 + PKCE client for apps built on the [ctech-account](https://accounts.aoctech.app)
 identity provider. One `OAuthClient` instance per app, config-only — no server, no framework dependency.
 
