@@ -1,4 +1,4 @@
-# @ctech/auth-client
+# @aoctech/auth-client
 
 Shared browser OAuth 2.0 + PKCE client for apps built on the [ctech-account](https://accounts.aoctech.app)
 identity provider. One `OAuthClient` instance per app, config-only — no server, no framework dependency.
@@ -19,13 +19,13 @@ local revoked-state before touching the network, and de-duplicates concurrent ca
 ## Install
 
 ```bash
-npm install @ctech/auth-client
+npm install @aoctech/auth-client
 ```
 
 ## Usage
 
 ```ts
-import { OAuthClient } from "@ctech/auth-client";
+import { OAuthClient } from "@aoctech/auth-client";
 
 export const oauth = new OAuthClient({
   baseUrl: process.env.NEXT_PUBLIC_CTECH_URL!,
