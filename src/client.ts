@@ -51,9 +51,17 @@ export class OAuthClient {
     this.storage.set("auth_state", state);
   }
 
-  /** Redirects to /v1.0/authorize, stashing PKCE verifier + state + returnTo
-   * in sessionStorage for exchangeCode() to pick up after the callback. */
-  async startOAuthFlow(returnTo = "/"): Promise<void> {
+  /**
+   * Redirects to /v1.0/authorize, stashing PKCE verifier + state + returnTo
+   * in sessionStorage for exchangeCode() to pick up after the callback.
+   *
+   * `opts.maxAge` (seconds, OIDC-standard) forces the IdP to require a fresh
+   * interactive login when the browser's SSO session is older than this —
+   * pass `0` to always force one. Use this for step-up flows (e.g. a
+   * withdrawal requiring recent MFA): without it, a valid SSO cookie alone
+   * silently re-authenticates the browser and never re-proves MFA.
+   */
+  async startOAuthFlow(returnTo = "/", opts?: { maxAge?: number }): Promise<void> {
     const state = generateState();
     const { codeVerifier, codeChallenge } = await generatePKCE();
 
@@ -70,6 +78,9 @@ export class OAuthClient {
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
     });
+    if (opts?.maxAge != null) {
+      params.set("max_age", String(opts.maxAge));
+    }
 
     window.location.href = `${this.config.baseUrl}/v1.0/authorize?${params}`;
   }

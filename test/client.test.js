@@ -59,6 +59,44 @@ test("refresh() never calls fetch when there is no auth hint — the wallet-SPA 
   delete globalThis.fetch;
 });
 
+test("startOAuthFlow appends max_age when requested — the withdrawal step-up regression", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "wallet",
+    redirectUri: "https://wallet.test/callback",
+    scope: "openid",
+  });
+
+  await client.startOAuthFlow("/dashboard", { maxAge: 0 });
+
+  const url = new URL(globalThis.window.location.href);
+  assert.equal(url.searchParams.get("max_age"), "0");
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+});
+
+test("startOAuthFlow omits max_age by default — every existing caller is unaffected", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "wallet",
+    redirectUri: "https://wallet.test/callback",
+    scope: "openid",
+  });
+
+  await client.startOAuthFlow("/dashboard");
+
+  const url = new URL(globalThis.window.location.href);
+  assert.equal(url.searchParams.has("max_age"), false);
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+});
+
 test("decodeIdToken extracts name claims from a JWT payload", () => {
   const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
   const idToken = `${b64url({ alg: "RS256" })}.${b64url({
