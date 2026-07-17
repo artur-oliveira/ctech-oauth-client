@@ -70,6 +70,25 @@ npm run build   # tsc -> dist/
 npm test        # build + node's built-in test runner
 ```
 
+## Releasing
+
+`publish.yml` only fires on a published GitHub Release — a push to `main` alone never publishes
+(it only runs `ci.yml`, which tests). Publishing uses npm's OIDC trusted publishing, so there's no
+`NPM_TOKEN` secret to manage; provenance is generated automatically.
+
+```bash
+# 1. Bump "version" in package.json, then commit and push as usual
+git commit -am "chore: release vX.Y.Z"
+git push
+
+# 2. Tag it and push the tag
+git tag vX.Y.Z
+git push --tags
+
+# 3. Cut the release — this is what actually triggers the publish workflow
+gh release create vX.Y.Z --generate-notes
+```
+
 ## License
 
 MIT
