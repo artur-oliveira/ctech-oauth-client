@@ -33,6 +33,7 @@ test("hasAuthHint reads the ctech_auth cookie from an explicit cookie string", (
   assert.equal(client.hasAuthHint("ctech_auth=1; other=x"), true);
   assert.equal(client.hasAuthHint("other=x"), false);
   assert.equal(client.hasAuthHint(""), false);
+  client.close();
 });
 
 test("refresh() never calls fetch when there is no auth hint — the wallet-SPA regression", async () => {
@@ -55,6 +56,7 @@ test("refresh() never calls fetch when there is no auth hint — the wallet-SPA 
   assert.equal(result, null);
   assert.equal(fetchCalled, false);
 
+  client.close();
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
 });
@@ -74,6 +76,7 @@ test("startOAuthFlow appends max_age when requested — the withdrawal step-up r
   const url = new URL(globalThis.window.location.href);
   assert.equal(url.searchParams.get("max_age"), "0");
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
 });
@@ -93,6 +96,7 @@ test("startOAuthFlow omits max_age by default — every existing caller is unaff
   const url = new URL(globalThis.window.location.href);
   assert.equal(url.searchParams.has("max_age"), false);
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
 });
@@ -119,6 +123,7 @@ test("refresh() collapses concurrent calls into a single fetch (single-flight de
   assert.strictEqual(first, second);
   assert.deepEqual(first, { accessToken: "tok", idToken: null });
 
+  client.close();
   delete globalThis.document;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -137,6 +142,7 @@ test("exchangeCode() throws on state mismatch", async () => {
 
   await assert.rejects(() => client.exchangeCode("code123", "not-the-real-state"), /OAuth state mismatch/);
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
 });
@@ -167,6 +173,7 @@ test("exchangeCode() exchanges the code, clears oauth_* storage, and returns tok
   assert.equal(client.storage.get("oauth_return_to"), null);
   assert.match(fetchBody, /grant_type=authorization_code/);
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -191,6 +198,7 @@ test("exchangeCode() throws with status and body on a non-2xx response", async (
     /Token exchange failed \(400\): invalid_grant/,
   );
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -212,6 +220,7 @@ test("refresh() sets auth_state to active and returns tokens on a 2xx response",
   assert.deepEqual(result, { accessToken: "tok", idToken: null });
   assert.equal(client.storage.get("auth_state"), "active");
 
+  client.close();
   delete globalThis.document;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -233,6 +242,7 @@ test("refresh() sets auth_state to revoked and returns null on a non-2xx respons
   assert.equal(result, null);
   assert.equal(client.storage.get("auth_state"), "revoked");
 
+  client.close();
   delete globalThis.document;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -257,6 +267,7 @@ test("refresh() leaves auth_state untouched and returns null on a network error"
   assert.equal(result, null);
   assert.equal(client.storage.get("auth_state"), "active");
 
+  client.close();
   delete globalThis.document;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -281,6 +292,7 @@ test("revoke() sets auth_state to revoked before the network call resolves", asy
   resolveFetch({ ok: true });
   await revokePromise;
 
+  client.close();
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
 });
@@ -313,6 +325,7 @@ test("refresh() started after revoke() returns null without calling fetch", asyn
   resolveRevokeFetch({ ok: true });
   await revokePromise;
 
+  client.close();
   delete globalThis.document;
   delete globalThis.sessionStorage;
   delete globalThis.fetch;
@@ -334,6 +347,7 @@ test("endSessionRedirect() redirects to /v1.0/auth/end-session with default retu
   assert.equal(url.searchParams.get("client_id"), "test");
   assert.equal(url.searchParams.get("post_logout_redirect_uri"), "https://app.test/login");
 
+  client.close();
   delete globalThis.window;
 });
 
@@ -351,6 +365,7 @@ test("endSessionRedirect() honors a custom returnTo", () => {
   const url = new URL(globalThis.window.location.href);
   assert.equal(url.searchParams.get("post_logout_redirect_uri"), "https://app.test/goodbye");
 
+  client.close();
   delete globalThis.window;
 });
 
@@ -372,8 +387,101 @@ test("startOAuthFlow includes a nonce param distinct from state", async () => {
   assert.match(nonce, /^[0-9a-f]{32}$/);
   assert.notEqual(nonce, state);
 
+  client.close();
   delete globalThis.window;
   delete globalThis.sessionStorage;
+});
+
+test("refresh() waits for a peer tab's in-flight refresh instead of firing its own fetch", async () => {
+  const prefix = `peer-refresh-${Math.random().toString(36).slice(2)}`;
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
+  let resolveFirstFetch;
+  const firstFetchGate = new Promise((resolve) => {
+    resolveFirstFetch = resolve;
+  });
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    if (fetchCallCount === 1) await firstFetchGate;
+    return { ok: true, json: async () => ({ access_token: `tok-${fetchCallCount}`, id_token: null }) };
+  };
+
+  const tabA = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+    storagePrefix: prefix,
+  });
+  const tabB = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+    storagePrefix: prefix,
+  });
+
+  const refreshA = tabA.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 10)); // let tab B's listener see "refresh-start"
+  const refreshB = tabB.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(fetchCallCount, 1, "tab B must not fire its own fetch while tab A is refreshing");
+
+  resolveFirstFetch();
+  const resultA = await refreshA;
+  assert.deepEqual(resultA, { accessToken: "tok-1", idToken: null });
+
+  const resultB = await refreshB;
+  assert.equal(fetchCallCount, 2, "tab B fires its own fetch once tab A's refresh completes");
+  assert.deepEqual(resultB, { accessToken: "tok-2", idToken: null });
+
+  tabA.close();
+  tabB.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("revoke() in one tab marks a sibling tab as revoked", async () => {
+  const prefix = `peer-revoke-${Math.random().toString(36).slice(2)}`;
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let refreshFetchCalled = false;
+  globalThis.fetch = async (_url, init) => {
+    if (init?.body?.includes?.("grant_type=refresh_token")) refreshFetchCalled = true;
+    return { ok: true };
+  };
+
+  const tabA = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+    storagePrefix: prefix,
+  });
+  const tabB = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+    storagePrefix: prefix,
+  });
+
+  await tabA.revoke();
+  await new Promise((resolve) => setTimeout(resolve, 10)); // let tab B's listener see "revoked"
+
+  const resultB = await tabB.refresh();
+
+  assert.equal(resultB, null);
+  assert.equal(refreshFetchCalled, false);
+
+  tabA.close();
+  tabB.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
 });
 
 test("decodeIdToken extracts name claims from a JWT payload", () => {

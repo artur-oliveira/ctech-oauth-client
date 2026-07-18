@@ -7,6 +7,10 @@ const AUTH_HINT_COOKIE = "ctech_auth";
 const AUTH_STATE_ACTIVE = "active";
 const AUTH_STATE_REVOKED = "revoked";
 
+type BroadcastMessage = { type: "refresh-start" } | { type: "refresh-done"; ok: boolean } | { type: "revoked" };
+
+const PEER_REFRESH_TIMEOUT_MS = 5000;
+
 /**
  * Browser OAuth 2.0 + PKCE client for apps behind the ctech-account IdP.
  * One instance per app, configured with that app's client_id/redirect_uri/scope.
@@ -14,9 +18,51 @@ const AUTH_STATE_REVOKED = "revoked";
 export class OAuthClient {
   private readonly storage: NamespacedStorage;
   private inFlightRefresh: Promise<TokenResult | null> | null = null;
+  private readonly broadcast: BroadcastChannel | null;
+  private peerRefreshing = false;
+  private peerDoneWaiters: Array<() => void> = [];
 
   constructor(private readonly config: OAuthClientConfig) {
     this.storage = new NamespacedStorage(config.storagePrefix ?? config.clientId);
+    this.broadcast =
+      typeof BroadcastChannel !== "undefined"
+        ? new BroadcastChannel(`ctech-oauth:${config.storagePrefix ?? config.clientId}`)
+        : null;
+    this.broadcast?.addEventListener("message", (event: MessageEvent<BroadcastMessage>) => {
+      this.onBroadcastMessage(event.data);
+    });
+  }
+
+  /** Closes this instance's cross-tab BroadcastChannel. Call on teardown (route unmount,
+   * end of a test) to release the underlying channel — an unclosed channel keeps the page
+   * (or a Node process, e.g. in tests) alive. No-op if BroadcastChannel isn't available. */
+  close(): void {
+    this.broadcast?.close();
+  }
+
+  private onBroadcastMessage(message: BroadcastMessage): void {
+    if (message.type === "refresh-start") {
+      this.peerRefreshing = true;
+      return;
+    }
+    if (message.type === "revoked") {
+      this.setAuthState(AUTH_STATE_REVOKED);
+    }
+    this.peerRefreshing = false;
+    const waiters = this.peerDoneWaiters;
+    this.peerDoneWaiters = [];
+    waiters.forEach((resolve) => resolve());
+  }
+
+  private waitForPeerRefresh(): Promise<void> {
+    if (!this.peerRefreshing) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, PEER_REFRESH_TIMEOUT_MS);
+      this.peerDoneWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
 
   /**
@@ -138,9 +184,21 @@ export class OAuthClient {
     if (!this.hasAuthHint()) return null;
     if (this.inFlightRefresh) return this.inFlightRefresh;
 
-    this.inFlightRefresh = this.doRefresh().finally(() => {
-      this.inFlightRefresh = null;
-    });
+    if (this.peerRefreshing) {
+      await this.waitForPeerRefresh();
+      if (this.isRevoked()) return null;
+      if (this.inFlightRefresh) return this.inFlightRefresh;
+    }
+
+    this.broadcast?.postMessage({ type: "refresh-start" } satisfies BroadcastMessage);
+    this.inFlightRefresh = this.doRefresh()
+      .then((result) => {
+        this.broadcast?.postMessage({ type: "refresh-done", ok: result != null } satisfies BroadcastMessage);
+        return result;
+      })
+      .finally(() => {
+        this.inFlightRefresh = null;
+      });
     return this.inFlightRefresh;
   }
 
@@ -171,6 +229,7 @@ export class OAuthClient {
    * so a refresh racing this call never resurrects the session. */
   async revoke(): Promise<void> {
     this.setAuthState(AUTH_STATE_REVOKED);
+    this.broadcast?.postMessage({ type: "revoked" } satisfies BroadcastMessage);
     try {
       await fetch(`${this.config.baseUrl}/v1.0/revoke`, {
         method: "POST",
