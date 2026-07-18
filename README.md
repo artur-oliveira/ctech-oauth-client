@@ -6,6 +6,9 @@
 Shared browser OAuth 2.0 + PKCE client for apps built on the [ctech-account](https://accounts.aoctech.app)
 identity provider. One `OAuthClient` instance per app, config-only — no server, no framework dependency.
 
+> Repo name is `ctech-oauth-client` on GitHub; published to npm as `@aoctech/auth-client`.
+> Searching by either name should land here.
+
 ## Why this exists
 
 Three SPAs (accounts, ctech-dfe, ctech-wallet) each carried their own ~200-line copy of the same OAuth
