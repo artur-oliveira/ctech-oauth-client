@@ -354,6 +354,28 @@ test("endSessionRedirect() honors a custom returnTo", () => {
   delete globalThis.window;
 });
 
+test("startOAuthFlow includes a nonce param distinct from state", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  await client.startOAuthFlow("/dashboard");
+
+  const url = new URL(globalThis.window.location.href);
+  const nonce = url.searchParams.get("nonce");
+  const state = url.searchParams.get("state");
+  assert.match(nonce, /^[0-9a-f]{32}$/);
+  assert.notEqual(nonce, state);
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+});
+
 test("decodeIdToken extracts name claims from a JWT payload", () => {
   const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
   const idToken = `${b64url({ alg: "RS256" })}.${b64url({

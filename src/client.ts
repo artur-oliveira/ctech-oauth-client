@@ -60,12 +60,18 @@ export class OAuthClient {
    * pass `0` to always force one. Use this for step-up flows (e.g. a
    * withdrawal requiring recent MFA): without it, a valid SSO cookie alone
    * silently re-authenticates the browser and never re-proves MFA.
+   *
+   * Also sends a `nonce` (OIDC-standard) so the IdP can enforce id_token replay protection
+   * server-side — this client does not itself validate it back, matching how
+   * `decodeIdToken()` performs no signature check (see `UnverifiedIdTokenClaims`).
    */
   async startOAuthFlow(returnTo = "/", opts?: { maxAge?: number }): Promise<void> {
     const state = generateState();
+    const nonce = generateState();
     const { codeVerifier, codeChallenge } = await generatePKCE();
 
     this.storage.set("oauth_state", state);
+    this.storage.set("oauth_nonce", nonce);
     this.storage.set("oauth_verifier", codeVerifier);
     this.storage.set("oauth_return_to", returnTo);
 
@@ -75,6 +81,7 @@ export class OAuthClient {
       redirect_uri: this.config.redirectUri,
       scope: this.config.scope,
       state,
+      nonce,
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
     });
