@@ -97,6 +97,33 @@ test("startOAuthFlow omits max_age by default — every existing caller is unaff
   delete globalThis.sessionStorage;
 });
 
+test("refresh() collapses concurrent calls into a single fetch (single-flight dedup)", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return { ok: true, json: async () => ({ access_token: "tok", id_token: null }) };
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const [first, second] = await Promise.all([client.refresh(), client.refresh()]);
+
+  assert.equal(fetchCallCount, 1);
+  assert.strictEqual(first, second);
+  assert.deepEqual(first, { accessToken: "tok", idToken: null });
+
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
 test("decodeIdToken extracts name claims from a JWT payload", () => {
   const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
   const idToken = `${b64url({ alg: "RS256" })}.${b64url({
