@@ -124,6 +124,236 @@ test("refresh() collapses concurrent calls into a single fetch (single-flight de
   delete globalThis.fetch;
 });
 
+test("exchangeCode() throws on state mismatch", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+  await client.startOAuthFlow("/dashboard");
+
+  await assert.rejects(() => client.exchangeCode("code123", "not-the-real-state"), /OAuth state mismatch/);
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+});
+
+test("exchangeCode() exchanges the code, clears oauth_* storage, and returns tokens + returnTo", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+  await client.startOAuthFlow("/dashboard");
+  const state = new URL(globalThis.window.location.href).searchParams.get("state");
+
+  let fetchBody;
+  globalThis.fetch = async (_url, init) => {
+    fetchBody = init.body;
+    return { ok: true, json: async () => ({ access_token: "tok", id_token: "idtok" }) };
+  };
+
+  const result = await client.exchangeCode("code123", state);
+
+  assert.deepEqual(result, { accessToken: "tok", idToken: "idtok", returnTo: "/dashboard" });
+  assert.equal(client.storage.get("oauth_state"), null);
+  assert.equal(client.storage.get("oauth_verifier"), null);
+  assert.equal(client.storage.get("oauth_return_to"), null);
+  assert.match(fetchBody, /grant_type=authorization_code/);
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("exchangeCode() throws with status and body on a non-2xx response", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.window = { location: { href: "" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+  await client.startOAuthFlow("/dashboard");
+  const state = new URL(globalThis.window.location.href).searchParams.get("state");
+
+  globalThis.fetch = async () => ({ ok: false, status: 400, text: async () => "invalid_grant" });
+
+  await assert.rejects(
+    () => client.exchangeCode("code123", state),
+    /Token exchange failed \(400\): invalid_grant/,
+  );
+
+  delete globalThis.window;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() sets auth_state to active and returns tokens on a 2xx response", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ access_token: "tok", id_token: null }) });
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const result = await client.refresh();
+
+  assert.deepEqual(result, { accessToken: "tok", idToken: null });
+  assert.equal(client.storage.get("auth_state"), "active");
+
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() sets auth_state to revoked and returns null on a non-2xx response", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "invalid_grant" });
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const result = await client.refresh();
+
+  assert.equal(result, null);
+  assert.equal(client.storage.get("auth_state"), "revoked");
+
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() leaves auth_state untouched and returns null on a network error", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  globalThis.fetch = async () => {
+    throw new Error("network down");
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+  client.storage.set("auth_state", "active");
+
+  const result = await client.refresh();
+
+  assert.equal(result, null);
+  assert.equal(client.storage.get("auth_state"), "active");
+
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("revoke() sets auth_state to revoked before the network call resolves", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  let resolveFetch;
+  globalThis.fetch = () => new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const revokePromise = client.revoke();
+
+  assert.equal(client.storage.get("auth_state"), "revoked");
+  resolveFetch({ ok: true });
+  await revokePromise;
+
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() started after revoke() returns null without calling fetch", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let resolveRevokeFetch;
+  let refreshFetchCalled = false;
+  globalThis.fetch = (_url, init) => {
+    if (init?.body?.includes?.("grant_type=refresh_token")) {
+      refreshFetchCalled = true;
+    }
+    return new Promise((resolve) => {
+      resolveRevokeFetch = resolve;
+    });
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const revokePromise = client.revoke();
+  const result = await client.refresh();
+
+  assert.equal(result, null);
+  assert.equal(refreshFetchCalled, false);
+  resolveRevokeFetch({ ok: true });
+  await revokePromise;
+
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("endSessionRedirect() redirects to /v1.0/auth/end-session with default returnTo", () => {
+  globalThis.window = { location: { href: "", origin: "https://app.test" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  client.endSessionRedirect();
+
+  const url = new URL(globalThis.window.location.href);
+  assert.equal(url.origin + url.pathname, "https://api.test/v1.0/auth/end-session");
+  assert.equal(url.searchParams.get("client_id"), "test");
+  assert.equal(url.searchParams.get("post_logout_redirect_uri"), "https://app.test/login");
+
+  delete globalThis.window;
+});
+
+test("endSessionRedirect() honors a custom returnTo", () => {
+  globalThis.window = { location: { href: "", origin: "https://app.test" } };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  client.endSessionRedirect("/goodbye");
+
+  const url = new URL(globalThis.window.location.href);
+  assert.equal(url.searchParams.get("post_logout_redirect_uri"), "https://app.test/goodbye");
+
+  delete globalThis.window;
+});
+
 test("decodeIdToken extracts name claims from a JWT payload", () => {
   const b64url = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
   const idToken = `${b64url({ alg: "RS256" })}.${b64url({
