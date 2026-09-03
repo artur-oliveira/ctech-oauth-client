@@ -226,7 +226,7 @@ test("refresh() sets auth_state to active and returns tokens on a 2xx response",
   delete globalThis.fetch;
 });
 
-test("refresh() sets auth_state to revoked and returns null on a non-2xx response", async () => {
+test("refresh() sets auth_state to revoked and returns null on a terminal 4xx response", async () => {
   globalThis.sessionStorage = makeSessionStorage();
   globalThis.document = { cookie: "ctech_auth=1" };
   globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "invalid_grant" });
@@ -248,7 +248,7 @@ test("refresh() sets auth_state to revoked and returns null on a non-2xx respons
   delete globalThis.fetch;
 });
 
-test("refresh() leaves auth_state untouched and returns null on a network error", async () => {
+test("refresh() leaves auth_state untouched and throws on a network error", async () => {
   globalThis.sessionStorage = makeSessionStorage();
   globalThis.document = { cookie: "ctech_auth=1" };
   globalThis.fetch = async () => {
@@ -262,9 +262,28 @@ test("refresh() leaves auth_state untouched and returns null on a network error"
   });
   client.storage.set("auth_state", "active");
 
-  const result = await client.refresh();
+  await assert.rejects(() => client.refresh(), { name: "OAuthTransientError" });
+  assert.equal(client.storage.get("auth_state"), "active");
 
-  assert.equal(result, null);
+  client.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() leaves auth_state active and throws on a retryable server response", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  globalThis.fetch = async () => ({ ok: false, status: 503 });
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+  client.storage.set("auth_state", "active");
+
+  await assert.rejects(() => client.refresh(), { name: "OAuthTransientError", status: 503 });
   assert.equal(client.storage.get("auth_state"), "active");
 
   client.close();
@@ -434,8 +453,8 @@ test("refresh() waits for a peer tab's in-flight refresh instead of firing its o
   assert.deepEqual(resultA, { accessToken: "tok-1", idToken: null });
 
   const resultB = await refreshB;
-  assert.equal(fetchCallCount, 2, "tab B fires its own fetch once tab A's refresh completes");
-  assert.deepEqual(resultB, { accessToken: "tok-2", idToken: null });
+  assert.equal(fetchCallCount, 1, "tab B reuses the result published by tab A");
+  assert.deepEqual(resultB, { accessToken: "tok-1", idToken: null });
 
   tabA.close();
   tabB.close();

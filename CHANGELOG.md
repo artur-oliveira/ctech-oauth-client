@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0] - 2026-09-03
+
+- Serialize refreshes across same-origin tabs with the Web Locks API and share
+  the leader's token response instead of rotating the cookie again.
+- Throw `OAuthTransientError` for network, throttling, timeout-like, and server
+  failures so applications preserve the current session instead of logging out.
+
 ## [1.1.0] - 2026-07-18
 
 - Cross-tab refresh/revoke coordination via `BroadcastChannel`, plus a new `close()` method.
