@@ -47,7 +47,7 @@ await oauth.startOAuthFlow("/dashboard");
 const { accessToken, idToken, returnTo } = await oauth.exchangeCode(code, state);
 
 // Silent refresh — safe to call from app boot AND a 401 interceptor at once
-const result = await oauth.refresh(); // null if not worth attempting or it failed
+const result = await oauth.refresh(); // null only when there is no usable session
 
 // Logout
 await oauth.revoke();
@@ -59,7 +59,9 @@ oauth.endSessionRedirect("/login");
 - `hasAuthHint(cookieString?)` / `clearAuthHint()` — read/clear the `ctech_auth` marker cookie.
 - `startOAuthFlow(returnTo?)` — redirects to `/v1.0/authorize` with a fresh PKCE pair.
 - `exchangeCode(code, state)` — `authorization_code` grant.
-- `refresh()` — guarded, single-flight `refresh_token` grant. Never throws.
+- `refresh()` — guarded, single-flight `refresh_token` grant. Throws
+  `OAuthTransientError` for retryable transport/server failures; `null` means
+  the credential is absent or definitively rejected.
 - `revoke()` — best-effort `POST /v1.0/revoke`.
 - `endSessionRedirect(returnTo?)` — RP-initiated logout via `/v1.0/auth/end-session`.
 - `decodeIdToken(idToken)` — unverified payload decode, for display-only name claims.
@@ -112,4 +114,3 @@ Anchors into `src/` (the dist is built from these; `src/index.ts:1-5` is the exp
   this client is stateless w.r.t. tokens. Hypothesis that it "stores tokens in HttpOnly cookies" is
   inaccurate — the cookies are the IdP's.
 - Config types — `OAuthClientConfig` `src/types.ts:1`, `TokenResult` `:14`.
-

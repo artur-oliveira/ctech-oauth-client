@@ -7,9 +7,16 @@ const AUTH_HINT_COOKIE = "ctech_auth";
 const AUTH_STATE_ACTIVE = "active";
 const AUTH_STATE_REVOKED = "revoked";
 
-type BroadcastMessage = { type: "refresh-start" } | { type: "refresh-done"; ok: boolean } | { type: "revoked" };
+type BroadcastMessage = { type: "refresh-start" } | { type: "refresh-done"; result: TokenResult | null } | { type: "revoked" };
 
 const PEER_REFRESH_TIMEOUT_MS = 5000;
+
+export class OAuthTransientError extends Error {
+  constructor(message: string, public readonly status?: number, public readonly cause?: unknown) {
+    super(message);
+    this.name = "OAuthTransientError";
+  }
+}
 
 /**
  * Browser OAuth 2.0 + PKCE client for apps behind the ctech-account IdP.
@@ -20,7 +27,7 @@ export class OAuthClient {
   private inFlightRefresh: Promise<TokenResult | null> | null = null;
   private readonly broadcast: BroadcastChannel | null;
   private peerRefreshing = false;
-  private peerDoneWaiters: Array<() => void> = [];
+  private peerDoneWaiters: Array<(result: TokenResult | null) => void> = [];
 
   constructor(private readonly config: OAuthClientConfig) {
     this.storage = new NamespacedStorage(config.storagePrefix ?? config.clientId);
@@ -51,16 +58,17 @@ export class OAuthClient {
     this.peerRefreshing = false;
     const waiters = this.peerDoneWaiters;
     this.peerDoneWaiters = [];
-    waiters.forEach((resolve) => resolve());
+    const result = message.type === "refresh-done" ? message.result : null;
+    waiters.forEach((resolve) => resolve(result));
   }
 
-  private waitForPeerRefresh(): Promise<void> {
-    if (!this.peerRefreshing) return Promise.resolve();
+  private waitForPeerRefresh(): Promise<TokenResult | null> {
+    if (!this.peerRefreshing) return Promise.resolve(null);
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, PEER_REFRESH_TIMEOUT_MS);
-      this.peerDoneWaiters.push(() => {
+      const timer = setTimeout(() => resolve(null), PEER_REFRESH_TIMEOUT_MS);
+      this.peerDoneWaiters.push((result) => {
         clearTimeout(timer);
-        resolve();
+        resolve(result);
       });
     });
   }
@@ -184,16 +192,30 @@ export class OAuthClient {
     if (!this.hasAuthHint()) return null;
     if (this.inFlightRefresh) return this.inFlightRefresh;
 
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (locks) {
+      return locks.request(`ctech-oauth-refresh:${this.config.storagePrefix ?? this.config.clientId}`, () =>
+        this.refreshWhileLocked(),
+      );
+    }
+    return this.refreshWhileLocked();
+  }
+
+  private async refreshWhileLocked(): Promise<TokenResult | null> {
+    if (this.isRevoked()) return null;
+    if (this.inFlightRefresh) return this.inFlightRefresh;
+
     if (this.peerRefreshing) {
-      await this.waitForPeerRefresh();
+      const peerResult = await this.waitForPeerRefresh();
       if (this.isRevoked()) return null;
       if (this.inFlightRefresh) return this.inFlightRefresh;
+      if (peerResult) return peerResult;
     }
 
     this.broadcast?.postMessage({ type: "refresh-start" } satisfies BroadcastMessage);
     this.inFlightRefresh = this.doRefresh()
       .then((result) => {
-        this.broadcast?.postMessage({ type: "refresh-done", ok: result != null } satisfies BroadcastMessage);
+        this.broadcast?.postMessage({ type: "refresh-done", result } satisfies BroadcastMessage);
         return result;
       })
       .finally(() => {
@@ -212,16 +234,20 @@ export class OAuthClient {
         body: body.toString(),
       });
       if (!res.ok) {
+        if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+          throw new OAuthTransientError(`Token refresh temporarily failed (${res.status})`, res.status);
+        }
         this.setAuthState(AUTH_STATE_REVOKED);
         return null;
       }
       const data = await res.json();
       this.setAuthState(AUTH_STATE_ACTIVE);
       return { accessToken: data.access_token, idToken: data.id_token ?? null };
-    } catch {
+    } catch (error) {
       // Network error — transient, not a revocation. Leave auth_state as-is
       // so the next attempt (e.g. the user's next navigation) tries again.
-      return null;
+      if (error instanceof OAuthTransientError) throw error;
+      throw new OAuthTransientError("Token refresh request failed", undefined, error);
     }
   }
 
@@ -235,6 +261,7 @@ export class OAuthClient {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         credentials: "include",
+        body: new URLSearchParams({ client_id: this.config.clientId }).toString(),
       });
     } catch {
       // Best-effort — the local revoke already stops future refreshes.

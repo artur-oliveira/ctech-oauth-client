@@ -23,8 +23,9 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
     pair + `state` + `nonce`. **Step-up auth is the `opts.maxAge` (seconds) option** `:134-136`
     (pass `0` to force a fresh login). There is **no** separate `startStepUpFlow` symbol.
   - `exchangeCode(code, state)` `:143` — `authorization_code` grant; throws on state mismatch.
-  - `refresh()` `:182` — guarded, single-flight `refresh_token` grant; **never throws**, returns
-    `null` when not worth attempting/failed. Cross-tab dedup via `BroadcastChannel` `:27-33`.
+  - `refresh()` `:182` — guarded, single-flight `refresh_token` grant; returns `null` only for an
+    absent/terminal session and throws `OAuthTransientError` for retryable failures. Cross-tab
+    serialization uses Web Locks and shares results through `BroadcastChannel`.
   - `revoke()` `:230` — best-effort `POST /v1.0/revoke` (marks local revoked first).
   - `endSessionRedirect(returnTo?)` `:247` — RP logout via `/v1.0/auth/end-session`.
   - `decodeIdToken(idToken)` `:255` — **unverified** display-only name claims (see below).
