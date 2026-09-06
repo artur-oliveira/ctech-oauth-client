@@ -22,16 +22,6 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
   - `startOAuthFlow(returnTo?, opts?)` `:122` — redirects to `/v1.0/authorize` with a fresh PKCE
     pair + `state` + `nonce`. **Step-up auth is the `opts.maxAge` (seconds) option** `:142-144`
     (pass `0` to force a fresh login). There is **no** separate `startStepUpFlow` symbol.
-<<<<<<< Updated upstream
-  - `exchangeCode(code, state)` `:143` — `authorization_code` grant; throws on state mismatch.
-  - `refresh()` `:182` — guarded, single-flight `refresh_token` grant; returns `null` only for an
-    absent/terminal session and throws `OAuthTransientError` for retryable failures. Cross-tab
-    serialization uses Web Locks and shares results through `BroadcastChannel`.
-  - `revoke()` `:230` — best-effort `POST /v1.0/revoke` (marks local revoked first).
-  - `endSessionRedirect(returnTo?)` `:247` — RP logout via `/v1.0/auth/end-session`.
-  - `decodeIdToken(idToken)` `:255` — **unverified** display-only name claims (see below).
-  - `close()` `:39` — release the `BroadcastChannel` on teardown.
-=======
   - `exchangeCode(code, state)` `:151` — `authorization_code` grant; throws on state mismatch.
   - `refresh()` `:190` — guarded, single-flight `refresh_token` grant; returns `null` only for an
     absent/terminal session and throws `OAuthTransientError` `:14` for retryable failures.
@@ -41,7 +31,6 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
   - `endSessionRedirect(returnTo?)` `:274` — RP logout via `/v1.0/auth/end-session`.
   - `decodeIdToken(idToken)` `:282` — **unverified** display-only name claims (see below).
   - `close()` `:46` — release the `BroadcastChannel` on teardown.
->>>>>>> Stashed changes
 - `generatePKCE()` `src/pkce.ts:14`, `generateState()` `:22`.
 - `decodeIdToken()` `src/jwt.ts:17` — returns `UnverifiedIdTokenClaims` `src/jwt.ts:1`. `IdTokenClaims`
   `:10` is a **deprecated** alias. Output has **no signature or nonce check** — display only.
