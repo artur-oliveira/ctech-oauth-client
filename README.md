@@ -59,9 +59,10 @@ oauth.endSessionRedirect("/login");
 - `hasAuthHint(cookieString?)` / `clearAuthHint()` — read/clear the `ctech_auth` marker cookie.
 - `startOAuthFlow(returnTo?)` — redirects to `/v1.0/authorize` with a fresh PKCE pair.
 - `exchangeCode(code, state)` — `authorization_code` grant.
-- `refresh()` — guarded, single-flight `refresh_token` grant. Throws
-  `OAuthTransientError` for retryable transport/server failures; `null` means
-  the credential is absent or definitively rejected.
+- `refresh()` — guarded, single-flight `refresh_token` grant. Retries a transient
+  transport/server failure a few times with backoff before giving up; throws
+  `OAuthTransientError` only once that's exhausted. `null` means the credential
+  is absent or definitively rejected — never retried.
 - `revoke()` — best-effort `POST /v1.0/revoke`.
 - `endSessionRedirect(returnTo?)` — RP-initiated logout via `/v1.0/auth/end-session`.
 - `decodeIdToken(idToken)` — unverified payload decode, for display-only name claims.

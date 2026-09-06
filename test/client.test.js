@@ -248,10 +248,12 @@ test("refresh() sets auth_state to revoked and returns null on a terminal 4xx re
   delete globalThis.fetch;
 });
 
-test("refresh() leaves auth_state untouched and throws on a network error", async () => {
+test("refresh() leaves auth_state untouched and throws OAuthTransientError after exhausting retries on a network error", async () => {
   globalThis.sessionStorage = makeSessionStorage();
   globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
   globalThis.fetch = async () => {
+    fetchCallCount++;
     throw new Error("network down");
   };
   const client = new OAuthClient({
@@ -264,6 +266,7 @@ test("refresh() leaves auth_state untouched and throws on a network error", asyn
 
   await assert.rejects(() => client.refresh(), { name: "OAuthTransientError" });
   assert.equal(client.storage.get("auth_state"), "active");
+  assert.equal(fetchCallCount, 3, "should retry twice (3 attempts total) before giving up");
 
   client.close();
   delete globalThis.document;
@@ -271,10 +274,14 @@ test("refresh() leaves auth_state untouched and throws on a network error", asyn
   delete globalThis.fetch;
 });
 
-test("refresh() leaves auth_state active and throws on a retryable server response", async () => {
+test("refresh() leaves auth_state active and throws OAuthTransientError after exhausting retries on a retryable server response", async () => {
   globalThis.sessionStorage = makeSessionStorage();
   globalThis.document = { cookie: "ctech_auth=1" };
-  globalThis.fetch = async () => ({ ok: false, status: 503 });
+  let fetchCallCount = 0;
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    return { ok: false, status: 503 };
+  };
   const client = new OAuthClient({
     baseUrl: "https://api.test",
     clientId: "test",
@@ -285,6 +292,95 @@ test("refresh() leaves auth_state active and throws on a retryable server respon
 
   await assert.rejects(() => client.refresh(), { name: "OAuthTransientError", status: 503 });
   assert.equal(client.storage.get("auth_state"), "active");
+  assert.equal(fetchCallCount, 3, "should retry twice (3 attempts total) before giving up");
+
+  client.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() retries a transient failure and returns the result once a later attempt succeeds", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    if (fetchCallCount < 2) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ access_token: "tok", id_token: null }) };
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const result = await client.refresh();
+
+  assert.deepEqual(result, { accessToken: "tok", idToken: null });
+  assert.equal(client.storage.get("auth_state"), "active");
+  assert.equal(fetchCallCount, 2, "should have retried once before succeeding");
+
+  client.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("refresh() does NOT retry a terminal 4xx failure — single fetch, immediate null", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    return { ok: false, status: 401, text: async () => "invalid_grant" };
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  const result = await client.refresh();
+
+  assert.equal(result, null);
+  assert.equal(client.storage.get("auth_state"), "revoked");
+  assert.equal(fetchCallCount, 1, "a terminal failure must not be retried");
+
+  client.close();
+  delete globalThis.document;
+  delete globalThis.sessionStorage;
+  delete globalThis.fetch;
+});
+
+test("concurrent refresh() calls during a retry sequence still fire only one underlying attempt sequence (single-flight)", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  let fetchCallCount = 0;
+  globalThis.fetch = async () => {
+    fetchCallCount++;
+    if (fetchCallCount < 2) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ access_token: "tok", id_token: null }) };
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "test",
+    redirectUri: "https://app.test/callback",
+    scope: "openid",
+  });
+
+  // Fire a second refresh() while the first is mid-retry (waiting on backoff).
+  const first = client.refresh();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const second = client.refresh();
+
+  const [resultA, resultB] = await Promise.all([first, second]);
+
+  assert.equal(fetchCallCount, 2, "the second caller must join the in-flight retry sequence, not start its own");
+  assert.strictEqual(resultA, resultB);
+  assert.deepEqual(resultA, { accessToken: "tok", idToken: null });
 
   client.close();
   delete globalThis.document;

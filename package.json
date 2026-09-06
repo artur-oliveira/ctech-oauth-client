@@ -1,6 +1,6 @@
 {
   "name": "@aoctech/auth-client",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Shared browser OAuth 2.0 / PKCE client for apps built on the ctech-account identity provider.",
   "repository": {
     "type": "git",
