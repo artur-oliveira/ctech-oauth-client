@@ -11,6 +11,17 @@ type BroadcastMessage = { type: "refresh-start" } | { type: "refresh-done"; resu
 
 const PEER_REFRESH_TIMEOUT_MS = 5000;
 
+// Retry shape for a transient refresh failure: 3 attempts total (1 initial + 2 retries),
+// exponential backoff (300ms, 600ms) capped at 1200ms, +/- 50% jitter. Worst case adds
+// well under 2s — this is a synchronous user-facing auth flow, not a background job.
+const REFRESH_RETRY_ATTEMPTS = 3;
+const REFRESH_RETRY_BASE_MS = 300;
+const REFRESH_RETRY_MAX_MS = 1200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class OAuthTransientError extends Error {
   constructor(message: string, public readonly status?: number, public readonly cause?: unknown) {
     super(message);
@@ -182,10 +193,13 @@ export class OAuthClient {
   }
 
   /**
-   * Guarded, single-flight silent refresh. Returns null (never throws) when
-   * a refresh isn't worth attempting or fails — callers fall back to
-   * startOAuthFlow(). Safe to call from multiple places at once (app boot,
-   * a 401 retry interceptor) without firing duplicate /v1.0/token requests.
+   * Guarded, single-flight silent refresh. Returns null when a refresh isn't
+   * worth attempting or the session is actually expired/revoked — callers
+   * fall back to startOAuthFlow(). A transient failure (network blip, 5xx)
+   * is retried a few times with backoff inside this single attempt before
+   * throwing OAuthTransientError. Safe to call from multiple places at once
+   * (app boot, a 401 retry interceptor) without firing duplicate
+   * /v1.0/token requests.
    */
   async refresh(): Promise<TokenResult | null> {
     if (this.isRevoked()) return null;
@@ -213,7 +227,7 @@ export class OAuthClient {
     }
 
     this.broadcast?.postMessage({ type: "refresh-start" } satisfies BroadcastMessage);
-    this.inFlightRefresh = this.doRefresh()
+    this.inFlightRefresh = this.doRefreshWithRetry()
       .then((result) => {
         this.broadcast?.postMessage({ type: "refresh-done", result } satisfies BroadcastMessage);
         return result;
@@ -222,6 +236,24 @@ export class OAuthClient {
         this.inFlightRefresh = null;
       });
     return this.inFlightRefresh;
+  }
+
+  /** Retries a transient refresh failure a few times with backoff, inside the single
+   * already-locked refresh attempt (see refreshWhileLocked) — retries never re-acquire
+   * the Web Lock or race other tabs. A terminal failure (returns null) or the final
+   * exhausted attempt's OAuthTransientError both propagate unchanged. */
+  private async doRefreshWithRetry(): Promise<TokenResult | null> {
+    for (let attempt = 1; attempt <= REFRESH_RETRY_ATTEMPTS; attempt++) {
+      try {
+        return await this.doRefresh();
+      } catch (error) {
+        if (!(error instanceof OAuthTransientError) || attempt === REFRESH_RETRY_ATTEMPTS) throw error;
+        const backoff = Math.min(REFRESH_RETRY_BASE_MS * 2 ** (attempt - 1), REFRESH_RETRY_MAX_MS);
+        await sleep(backoff + Math.random() * backoff * 0.5);
+      }
+    }
+    /* istanbul ignore next -- unreachable: loop always returns or throws */
+    throw new Error("unreachable");
   }
 
   private async doRefresh(): Promise<TokenResult | null> {

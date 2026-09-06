@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.0] - 2026-09-06
+
+- `refresh()` now retries an `OAuthTransientError` (network blip, throttling, timeout-like, or
+  5xx failure during token refresh) up to 2 times with exponential backoff + jitter (300ms,
+  600ms, capped at 1200ms) before giving up, all inside the same single-flight/Web-Locks-guarded
+  attempt. A terminal failure (revoked/expired session) is never retried — it still resolves to
+  `null` immediately. If every attempt is transient, `refresh()` still throws
+  `OAuthTransientError` as before, so a sustained outage is still distinguishable from "logged
+  out"; callers that already catch it are unaffected, they just see it less often.
+
 ## [1.2.0] - 2026-09-03
 
 - Serialize refreshes across same-origin tabs with the Web Locks API and share

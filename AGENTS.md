@@ -24,8 +24,10 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
     (pass `0` to force a fresh login). There is **no** separate `startStepUpFlow` symbol.
   - `exchangeCode(code, state)` `:151` — `authorization_code` grant; throws on state mismatch.
   - `refresh()` `:190` — guarded, single-flight `refresh_token` grant; returns `null` only for an
-    absent/terminal session and throws `OAuthTransientError` `:14` for retryable failures.
-    Cross-tab serialization uses the Web Locks API (`refreshWhileLocked` `:204`) and shares
+    absent/terminal session. A retryable failure is retried in-place (`doRefreshWithRetry`,
+    3 attempts total, backoff+jitter) before throwing `OAuthTransientError` `:14` — the retry loop
+    runs inside the single locked attempt, so it never re-acquires the Web Lock or races other
+    tabs. Cross-tab serialization uses the Web Locks API (`refreshWhileLocked` `:204`) and shares
     results through `BroadcastChannel`.
   - `revoke()` `:256` — best-effort `POST /v1.0/revoke` (marks local revoked first).
   - `endSessionRedirect(returnTo?)` `:274` — RP logout via `/v1.0/auth/end-session`.
@@ -50,7 +52,8 @@ server-side; this package is stateless w.r.t. tokens.
 
 - v1.1.0 added `BroadcastChannel` coordination + `close()` + `nonce` + `UnverifiedIdTokenClaims`
   rename; v1.2.0 added Web Locks-based cross-tab refresh serialization and
-  `OAuthTransientError` (`CHANGELOG.md`).
+  `OAuthTransientError`; v1.3.0 added in-place retry-with-backoff for transient refresh
+  failures (`CHANGELOG.md`).
 - MIT licensed. Publish via npm OIDC trusted publishing on GitHub Release.
 
 ## Mandatory Documentation Policy
