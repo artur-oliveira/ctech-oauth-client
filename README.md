@@ -102,15 +102,16 @@ MIT
 
 Anchors into `src/` (the dist is built from these; `src/index.ts:1-5` is the export surface):
 
-- `OAuthClient` — `src/client.ts:18`. `startOAuthFlow(returnTo?, opts?)` `:114`; **step-up is the
-  `opts.maxAge` seconds option** `:134-136` (there is no `startStepUpFlow` symbol). `exchangeCode`
-  `:143`, `refresh()` `:182` (single-flight, never throws), `revoke()` `:230`, `endSessionRedirect`
-  `:247`, `hasAuthHint` `:76` / `clearAuthHint` `:82`, `decodeIdToken` `:255`, `close()` `:39`.
+- `OAuthClient` — `src/client.ts:25`. `startOAuthFlow(returnTo?, opts?)` `:122`; **step-up is the
+  `opts.maxAge` seconds option** `:142-144` (there is no `startStepUpFlow` symbol). `exchangeCode`
+  `:151`, `refresh()` `:190` (single-flight, throws `OAuthTransientError` `:14` for retryable
+  failures), `revoke()` `:256`, `endSessionRedirect` `:274`, `hasAuthHint` `:84` / `clearAuthHint`
+  `:90`, `decodeIdToken` `:282`, `close()` `:46`.
 - PKCE/state — `generatePKCE` `src/pkce.ts:14`, `generateState` `:22`.
 - id_token decode — `decodeIdToken` `src/jwt.ts:17` → `UnverifiedIdTokenClaims` `src/jwt.ts:1`
   (`IdTokenClaims` `:10` is a deprecated alias; **no signature/nonce check**).
 - Storage — `NamespacedStorage` `src/storage.ts:3` is **sessionStorage** (PKCE/ephemeral state only).
-  Tokens are held by the IdP in **HttpOnly cookies** (`credentials:"include"` `src/client.ts:165`);
+  Tokens are held by the IdP in **HttpOnly cookies** (`credentials:"include"` `src/client.ts:173`);
   this client is stateless w.r.t. tokens. Hypothesis that it "stores tokens in HttpOnly cookies" is
   inaccurate — the cookies are the IdP's.
 - Config types — `OAuthClientConfig` `src/types.ts:1`, `TokenResult` `:14`.

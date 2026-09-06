@@ -14,14 +14,15 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
 
 ## Public API (anchored to file:line in `src/`)
 
-- `OAuthClient` — `src/client.ts:18`. Construct once per app: `new OAuthClient(config)`
-  (`constructor` `:25`; `OAuthClientConfig` `src/types.ts:1`).
-  - `hasAuthHint(cookieString?)` `:76` / `clearAuthHint()` `:82` — read/clean the `ctech_auth`
+- `OAuthClient` — `src/client.ts:25`. Construct once per app: `new OAuthClient(config)`
+  (`constructor` `:32`; `OAuthClientConfig` `src/types.ts:1`).
+  - `hasAuthHint(cookieString?)` `:84` / `clearAuthHint()` `:90` — read/clean the `ctech_auth`
     marker cookie the IdP sets on the parent domain. `refresh()` checks this first so a SPA with no
     session never burns the IdP's brute-force rate limit.
-  - `startOAuthFlow(returnTo?, opts?)` `:114` — redirects to `/v1.0/authorize` with a fresh PKCE
-    pair + `state` + `nonce`. **Step-up auth is the `opts.maxAge` (seconds) option** `:134-136`
+  - `startOAuthFlow(returnTo?, opts?)` `:122` — redirects to `/v1.0/authorize` with a fresh PKCE
+    pair + `state` + `nonce`. **Step-up auth is the `opts.maxAge` (seconds) option** `:142-144`
     (pass `0` to force a fresh login). There is **no** separate `startStepUpFlow` symbol.
+<<<<<<< Updated upstream
   - `exchangeCode(code, state)` `:143` — `authorization_code` grant; throws on state mismatch.
   - `refresh()` `:182` — guarded, single-flight `refresh_token` grant; returns `null` only for an
     absent/terminal session and throws `OAuthTransientError` for retryable failures. Cross-tab
@@ -30,6 +31,17 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
   - `endSessionRedirect(returnTo?)` `:247` — RP logout via `/v1.0/auth/end-session`.
   - `decodeIdToken(idToken)` `:255` — **unverified** display-only name claims (see below).
   - `close()` `:39` — release the `BroadcastChannel` on teardown.
+=======
+  - `exchangeCode(code, state)` `:151` — `authorization_code` grant; throws on state mismatch.
+  - `refresh()` `:190` — guarded, single-flight `refresh_token` grant; returns `null` only for an
+    absent/terminal session and throws `OAuthTransientError` `:14` for retryable failures.
+    Cross-tab serialization uses the Web Locks API (`refreshWhileLocked` `:204`) and shares
+    results through `BroadcastChannel`.
+  - `revoke()` `:256` — best-effort `POST /v1.0/revoke` (marks local revoked first).
+  - `endSessionRedirect(returnTo?)` `:274` — RP logout via `/v1.0/auth/end-session`.
+  - `decodeIdToken(idToken)` `:282` — **unverified** display-only name claims (see below).
+  - `close()` `:46` — release the `BroadcastChannel` on teardown.
+>>>>>>> Stashed changes
 - `generatePKCE()` `src/pkce.ts:14`, `generateState()` `:22`.
 - `decodeIdToken()` `src/jwt.ts:17` — returns `UnverifiedIdTokenClaims` `src/jwt.ts:1`. `IdTokenClaims`
   `:10` is a **deprecated** alias. Output has **no signature or nonce check** — display only.
@@ -39,7 +51,7 @@ Repo dir is `ctech-oauth-client`; npm name is `@aoctech/auth-client`.
 ## Token storage — what is actually implemented
 
 This client does **not** store access/refresh tokens. The IdP holds them in **HttpOnly cookies**
-(`credentials: "include"` on `/v1.0/token` `src/client.ts:165`); this client persists only the
+(`credentials: "include"` on `/v1.0/token` `src/client.ts:173`); this client persists only the
 PKCE/ephemeral handshake state (`oauth_state`, `oauth_verifier`, `oauth_nonce`, `oauth_return_to`,
 `auth_state`) in **sessionStorage** via `NamespacedStorage` `src/storage.ts:3`. Hypothesis that this
 lib "stores tokens in HttpOnly cookies" is inaccurate — the HttpOnly cookies are the IdP's, set
@@ -48,7 +60,8 @@ server-side; this package is stateless w.r.t. tokens.
 ## Notes
 
 - v1.1.0 added `BroadcastChannel` coordination + `close()` + `nonce` + `UnverifiedIdTokenClaims`
-  rename (`CHANGELOG.md`).
+  rename; v1.2.0 added Web Locks-based cross-tab refresh serialization and
+  `OAuthTransientError` (`CHANGELOG.md`).
 - MIT licensed. Publish via npm OIDC trusted publishing on GitHub Release.
 
 ## Mandatory Documentation Policy
