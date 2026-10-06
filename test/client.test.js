@@ -612,3 +612,23 @@ test("decodeIdToken extracts name claims from a JWT payload", () => {
   assert.deepEqual(claims, { username: "ada", first_name: "Ada", last_name: "Lovelace" });
   assert.equal(decodeIdToken("not-a-jwt"), null);
 });
+
+test("refresh exposes valid expiry, omits invalid TTL and uses opt-in timeout", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = {cookie: "ctech_auth=1"};
+  try {
+    for (const ttl of [60, undefined, -1, 0, "60", Infinity]) {
+      globalThis.fetch = async (_url, options) => {
+        assert.ok(options.signal instanceof AbortSignal);
+        return {ok:true,json:async()=>({access_token:"tok",expires_in:ttl})};
+      };
+      const client = new OAuthClient({baseUrl:"https://api.test",clientId:`ttl-${String(ttl)}`,redirectUri:"https://app.test/callback",scope:"openid",requestTimeoutMs:3000});
+      const start=Date.now();
+      try {
+        const result=await client.refresh();
+        if (ttl===60) assert.ok(result.expiresAt>=start+60000 && result.expiresAt<=Date.now()+60000);
+        else assert.deepEqual(result,{accessToken:"tok",idToken:null});
+      } finally {client.close();}
+    }
+  } finally {delete globalThis.sessionStorage;delete globalThis.document;delete globalThis.fetch;}
+});

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.4.0] - 2026-10-06
+
+- Optional expiresAt derives from valid expires_in for proactive refresh scheduling. Missing/invalid TTL preserves the legacy response shape. Scheduling metadata never grants authorization.
+- Optional requestTimeoutMs bounds token fetch; omitted preserves existing behavior. Refresh timeouts retain transient retry and cross-tab singleflight semantics.
+
 ## [1.3.0] - 2026-09-06
 
 - `refresh()` now retries an `OAuthTransientError` (network blip, throttling, timeout-like, or

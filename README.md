@@ -116,3 +116,7 @@ Anchors into `src/` (the dist is built from these; `src/index.ts:1-5` is the exp
   this client is stateless w.r.t. tokens. Hypothesis that it "stores tokens in HttpOnly cookies" is
   inaccurate — the cookies are the IdP's.
 - Config types — `OAuthClientConfig` `src/types.ts:1`, `TokenResult` `:14`.
+
+## Refresh scheduling (1.4.0)
+
+TokenResult.expiresAt is optional client epoch milliseconds derived from expires_in. Schedule renewal early; this is not verified authorization or server time. requestTimeoutMs optionally bounds token-endpoint fetch; existing transient retries and cross-tab locking remain. Tokens are not persisted.

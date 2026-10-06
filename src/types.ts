@@ -9,9 +9,13 @@ export interface OAuthClientConfig {
   scope: string;
   /** sessionStorage key namespace. Defaults to clientId. */
   storagePrefix?: string;
+  /** Optional token-endpoint request timeout, in milliseconds. */
+  requestTimeoutMs?: number;
 }
 
 export interface TokenResult {
   accessToken: string;
   idToken?: string | null;
+  /** Approximate client expiry in epoch milliseconds, for refresh scheduling only. */
+  expiresAt?: number;
 }

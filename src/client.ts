@@ -22,6 +22,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function expiryMetadata(seconds: unknown): Pick<TokenResult, "expiresAt"> {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return {};
+  const expiresAt = Date.now() + seconds * 1000;
+  return Number.isSafeInteger(expiresAt) ? { expiresAt } : {};
+}
+
 export class OAuthTransientError extends Error {
   constructor(message: string, public readonly status?: number, public readonly cause?: unknown) {
     super(message);
@@ -182,6 +188,7 @@ export class OAuthClient {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       credentials: "include",
+      signal: this.config.requestTimeoutMs ? AbortSignal.timeout(this.config.requestTimeoutMs) : undefined,
       body: body.toString(),
     });
     if (!res.ok) {
@@ -189,7 +196,7 @@ export class OAuthClient {
     }
     const data = await res.json();
     this.setAuthState(AUTH_STATE_ACTIVE);
-    return { accessToken: data.access_token, idToken: data.id_token ?? null, returnTo };
+    return { accessToken: data.access_token, idToken: data.id_token ?? null, ...expiryMetadata(data.expires_in), returnTo };
   }
 
   /**
@@ -263,6 +270,7 @@ export class OAuthClient {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         credentials: "include",
+        signal: this.config.requestTimeoutMs ? AbortSignal.timeout(this.config.requestTimeoutMs) : undefined,
         body: body.toString(),
       });
       if (!res.ok) {
@@ -274,7 +282,7 @@ export class OAuthClient {
       }
       const data = await res.json();
       this.setAuthState(AUTH_STATE_ACTIVE);
-      return { accessToken: data.access_token, idToken: data.id_token ?? null };
+      return { accessToken: data.access_token, idToken: data.id_token ?? null, ...expiryMetadata(data.expires_in) };
     } catch (error) {
       // Network error — transient, not a revocation. Leave auth_state as-is
       // so the next attempt (e.g. the user's next navigation) tries again.
@@ -293,6 +301,7 @@ export class OAuthClient {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         credentials: "include",
+        signal: this.config.requestTimeoutMs ? AbortSignal.timeout(this.config.requestTimeoutMs) : undefined,
         body: new URLSearchParams({ client_id: this.config.clientId }).toString(),
       });
     } catch {
