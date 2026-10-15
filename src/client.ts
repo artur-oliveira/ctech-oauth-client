@@ -42,6 +42,7 @@ export class OAuthTransientError extends Error {
 export class OAuthClient {
   private readonly storage: NamespacedStorage;
   private inFlightRefresh: Promise<TokenResult | null> | null = null;
+  private inFlightExchange: Promise<TokenResult & { returnTo: string }> | null = null;
   private readonly broadcast: BroadcastChannel | null;
   private peerRefreshing = false;
   private peerDoneWaiters: Array<(result: TokenResult | null) => void> = [];
@@ -165,7 +166,19 @@ export class OAuthClient {
 
   /** Exchanges an authorization_code for tokens. Throws on state mismatch or
    * a non-2xx response — callers decide how to surface that. */
-  async exchangeCode(code: string, state: string): Promise<TokenResult & { returnTo: string }> {
+  exchangeCode(code: string, state: string): Promise<TokenResult & { returnTo: string }> {
+    // Registered synchronously so a refresh() fired in the same tick (an SPA's boot refresh
+    // racing the /callback page) can see it and yield instead of overtaking the new session.
+    const exchange = this.doExchangeCode(code, state);
+    this.inFlightExchange = exchange;
+    const clear = () => {
+      if (this.inFlightExchange === exchange) this.inFlightExchange = null;
+    };
+    exchange.then(clear, clear);
+    return exchange;
+  }
+
+  private async doExchangeCode(code: string, state: string): Promise<TokenResult & { returnTo: string }> {
     const storedState = this.storage.get("oauth_state");
     if (!storedState || storedState !== state) {
       throw new Error("OAuth state mismatch");
@@ -209,6 +222,17 @@ export class OAuthClient {
    * /v1.0/token requests.
    */
   async refresh(): Promise<TokenResult | null> {
+    // A code exchange in flight mints the freshest session (e.g. a step-up login). Refreshing
+    // with the previous session's cookie would finish after it and clobber its claims, so
+    // wait for the exchange and hand back its token instead.
+    if (this.inFlightExchange) {
+      try {
+        const { returnTo: _returnTo, ...token } = await this.inFlightExchange;
+        return token;
+      } catch {
+        // exchange failed: fall through to a normal refresh
+      }
+    }
     if (this.isRevoked()) return null;
     if (!this.hasAuthHint()) return null;
     if (this.inFlightRefresh) return this.inFlightRefresh;

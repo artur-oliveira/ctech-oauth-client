@@ -632,3 +632,41 @@ test("refresh exposes valid expiry, omits invalid TTL and uses opt-in timeout", 
     }
   } finally {delete globalThis.sessionStorage;delete globalThis.document;delete globalThis.fetch;}
 });
+
+test("refresh() issued while a code exchange is in flight yields to it instead of overtaking it", async () => {
+  globalThis.sessionStorage = makeSessionStorage();
+  globalThis.document = { cookie: "ctech_auth=1" };
+  const grants = [];
+  let release;
+  const gate = new Promise((r) => (release = r));
+  globalThis.fetch = async (_url, init) => {
+    const grant = new URLSearchParams(init.body).get("grant_type");
+    grants.push(grant);
+    if (grant === "authorization_code") await gate;
+    const token = grant === "authorization_code" ? "fresh" : "stale";
+    return { ok: true, status: 200, json: async () => ({ access_token: token }), text: async () => "" };
+  };
+  const client = new OAuthClient({
+    baseUrl: "https://api.test",
+    clientId: "wallet",
+    redirectUri: "https://wallet.test/callback",
+    scope: "openid",
+  });
+  globalThis.window = { location: { href: "" } };
+  await client.startOAuthFlow("/withdraw", { maxAge: 0 });
+  const state = new URL(globalThis.window.location.href).searchParams.get("state");
+
+  const exchange = client.exchangeCode("code", state);
+  const refresh = client.refresh();
+  release();
+  const [ex, rf] = await Promise.all([exchange, refresh]);
+
+  assert.equal(ex.accessToken, "fresh");
+  assert.equal(rf.accessToken, "fresh");
+  assert.deepEqual(grants, ["authorization_code"]);
+
+  client.close();
+  delete globalThis.sessionStorage;
+  delete globalThis.document;
+  delete globalThis.window;
+});

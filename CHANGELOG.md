@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.4.1] - 2026-10-15
+
+- Fix: a `refresh()` fired while `exchangeCode()` is in flight (an SPA's boot refresh racing its `/callback` page) now waits for the exchange and returns its token. Before, the refresh ran with the previous session's cookie and, finishing last, overwrote the new session's claims — a step-up login (`maxAge: 0`) came back with a stale `last_mfa_at` and the protected action kept answering step-up-required.
+
 ## [1.4.0] - 2026-10-06
 
 - Optional expiresAt derives from valid expires_in for proactive refresh scheduling. Missing/invalid TTL preserves the legacy response shape. Scheduling metadata never grants authorization.
