@@ -1,5 +1,13 @@
 # AGENTS.md — ctech-oauth-client (npm `@aoctech/auth-client`)
 
+## CTech Standards (mandatory)
+
+Before writing, changing or reviewing any code or infra here, load the `ctech-dev-standards` skill (plugin
+`ctech-skills`, repo github.com/artur-oliveira/ctech-skills). It is the single source of truth for backend,
+frontend and infra (patterns, resilience, scale, cost). If anything in this file contradicts it, the skill
+wins and this file must be fixed. Install on a new machine:
+`/plugin marketplace add artur-oliveira/ctech-skills` then `/plugin install ctech-skills@ctech-skills`.
+
 **Reuse me, don't fork.** This is the single browser OAuth 2.0 + PKCE client for every CTech SPA
 (accounts, dfe, wallet). If you are wiring a new SPA to ctech-account, import this — do not copy a
 ~200-line flow again (that drift is exactly what this package ended).
